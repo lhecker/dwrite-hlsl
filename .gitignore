@@ -1,0 +1,9 @@
+/_ReSharper.Caches
+/.vs
+/.vscode
+/ARM64
+/Debug
+/Release
+/x64
+imgui.ini
+*.user
