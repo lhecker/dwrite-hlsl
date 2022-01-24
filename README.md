@@ -13,8 +13,6 @@ This project is an extract of [Windows Terminal](https://github.com/microsoft/te
 
 ## Missing features
 
-* ClearType<br>
-  I'll add support for this at a later point in time.
 * Emojis<br>
   Emojis are luckily very simple to draw and I'll add support later:
   * Draw them with grayscale antialiasing (and not ClearType).

@@ -10,7 +10,9 @@ cbuffer ConstBuffer : register(b0)
     float4 background;
     float4 foreground;
     float4 gammaRatios;
+    float cleartypeEnhancedContrast;
     float grayscaleEnhancedContrast;
+    uint useClearType;
 };
 
 // d2dTexture stores text/glyphs as drawn by Direct2D natively.
@@ -45,10 +47,15 @@ float4 main(float4 pos: SV_Position): SV_Target
     // The texture drawn with D2D will be shown as it is.
     // It's already blended with the background and is for comparison only.
     float4 d2dColor = d2dTexture[tilePos];
-
+    
     // This applies the internal DirectWrite alpha blending algorithm.
-    float correctedAlpha = DWrite_GetGrayscaleCorrectedAlpha(gammaRatios, grayscaleEnhancedContrast, false, foreground.rgb / foreground.a, d3dTexture[tilePos].a);
-    float4 d3dColor = alphaBlendPremultiplied(background, foreground * correctedAlpha);
+    float4 d3dColor;
+    if (useClearType) {
+        d3dColor = DWrite_CleartypeBlend(gammaRatios, cleartypeEnhancedContrast, false, background, foreground, d3dTexture[tilePos]);
+    } else {
+        float4 c = DWrite_GrayscaleBlend(gammaRatios, grayscaleEnhancedContrast, false, foreground, d3dTexture[tilePos].a);
+        d3dColor = alphaBlendPremultiplied(background, c);
+    }
 
     // It's technically not necessary to compute both d2dColor and d3dColor,
     // but it's also not very expensive and I'll probably add a diff mode at some point.

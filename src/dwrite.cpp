@@ -9,6 +9,12 @@
 
 #include <wil/com.h>
 
+template<typename T>
+constexpr T clamp(T v, T min, T max) noexcept
+{
+    return std::max(min, std::min(max, v));
+}
+
 // The gamma and grayscaleEnhancedContrast values are required for DWrite_GetGrayscaleCorrectedAlpha().
 // in shader.hlsl later and can be passed in your cbuffer for instance.
 // The returned linearParams object can be passed to various DirectWrite/D2D
@@ -20,13 +26,15 @@
 //
 // Under Windows applications aren't expected to refresh the rendering params after startup,
 // allowing you to cache these values for the lifetime of your application.
-void DWrite_GetRenderParams(IDWriteFactory1* factory, float* gamma, float* grayscaleEnhancedContrast, IDWriteRenderingParams1** linearParams)
+void DWrite_GetRenderParams(IDWriteFactory1* factory, float* gamma, float* cleartypeEnhancedContrast, float* grayscaleEnhancedContrast, IDWriteRenderingParams1** linearParams)
 {
     // If you're concerned with crash resilience don't use reinterpret_cast
     // and use .query<IDWriteRenderingParams1>() or ->QueryInterface() instead.
     wil::com_ptr<IDWriteRenderingParams1> defaultParams;
     THROW_IF_FAILED(factory->CreateRenderingParams(reinterpret_cast<IDWriteRenderingParams**>(defaultParams.addressof())));
+
     *gamma = defaultParams->GetGamma();
+    *cleartypeEnhancedContrast = defaultParams->GetEnhancedContrast();
     *grayscaleEnhancedContrast = defaultParams->GetGrayscaleEnhancedContrast();
 
     THROW_IF_FAILED(factory->CreateCustomRenderingParams(1.0f, 0.0f, 0.0f, defaultParams->GetClearTypeLevel(), defaultParams->GetPixelGeometry(), defaultParams->GetRenderingMode(), linearParams));
@@ -62,9 +70,7 @@ f32x4 DWrite_GetGammaRatios(f32 gamma) noexcept
     static constexpr auto norm13 = static_cast<f32>(static_cast<double>(0x10000) / (255 * 255) * 4);
     static constexpr auto norm24 = static_cast<f32>(static_cast<double>(0x100) / (255) * 4);
 
-    gamma = std::max(1.0f, std::min(2.2f, gamma));
-    ;
-    const auto index = static_cast<size_t>(std::round((gamma - 1.0f) * 10.0f));
+    const auto index = clamp<size_t>(static_cast<size_t>(gamma * 10.0f + 0.5f), 10, 22) - 10;
     const auto& ratios = gammaIncorrectTargetRatios[index];
 
     return {

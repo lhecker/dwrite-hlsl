@@ -13,19 +13,24 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <string>
 #include <vector>
 
 // wil
 #include <wil/com.h>
+#include <wil/filesystem.h>
 // imgui
 #include <imgui.h>
 #include <backends/imgui_impl_dx11.h>
 #include <backends/imgui_impl_win32.h>
 // our stuff
+#include <d3dcompiler.h>
 #include <main_vs.h>
 #include <main_ps.h>
+#include <thread>
 
 #include "dwrite.h"
 
@@ -43,7 +48,9 @@ struct alignas(16) ConstantBuffer
     alignas(sizeof(f32x4)) f32x4 foreground;
 
     alignas(sizeof(f32x4)) f32x4 gammaRatios;
+    alignas(sizeof(f32)) f32 cleartypeEnhancedContrast = 0;
     alignas(sizeof(f32)) f32 grayscaleEnhancedContrast = 0;
+    alignas(sizeof(u32)) u32 useClearType = 0;
 };
 
 // Forward declare message handler from imgui_impl_win32.cpp
@@ -143,6 +150,40 @@ static const std::string* getFontNameRefFromCollection(const std::vector<std::st
     return &fontNames[0];
 }
 
+static void createD2DRenderTargetTexture(ID3D11Device* device, ID2D1Factory* d2dFactory, UINT width, UINT height, UINT dpi, ID2D1RenderTarget** renderTarget, ID3D11ShaderResourceView** textureView)
+{
+    wil::com_ptr<ID3D11Texture2D> texture;
+    {
+        D3D11_TEXTURE2D_DESC desc{};
+        desc.Width = width;
+        desc.Height = height;
+        desc.MipLevels = 1;
+        desc.ArraySize = 1;
+        desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        desc.SampleDesc.Count = 1;
+        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+        THROW_IF_FAILED(device->CreateTexture2D(&desc, nullptr, texture.addressof()));
+    }
+
+    wil::com_ptr<ID3D11ShaderResourceView> textureViewPtr;
+    THROW_IF_FAILED(device->CreateShaderResourceView(texture.get(), nullptr, textureViewPtr.addressof()));
+
+    wil::com_ptr<ID2D1RenderTarget> renderTargetPtr;
+    {
+        D2D1_RENDER_TARGET_PROPERTIES props{};
+        props.type = D2D1_RENDER_TARGET_TYPE_DEFAULT;
+        props.pixelFormat = { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED };
+        props.dpiX = static_cast<f32>(dpi);
+        props.dpiY = static_cast<f32>(dpi);
+        THROW_IF_FAILED(d2dFactory->CreateDxgiSurfaceRenderTarget(texture.query<IDXGISurface>().get(), &props, renderTargetPtr.addressof()));
+    }
+
+    renderTargetPtr->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
+
+    *renderTarget = renderTargetPtr.detach();
+    *textureView = textureViewPtr.detach();
+}
+
 static void updateDarkModeForWindow(HWND hwnd)
 {
     static const auto ShouldAppsUseDarkMode = []() {
@@ -177,7 +218,7 @@ try
     switch (message)
     {
     case WM_SETTINGCHANGE:
-        if (wParam == 0 && wcscmp(reinterpret_cast<const wchar_t*>(lParam), L"ImmersiveColorSet") == 0)
+        if (!wParam && lParam && wcscmp(reinterpret_cast<const wchar_t*>(lParam), L"ImmersiveColorSet") == 0)
         {
             updateDarkModeForWindow(hWnd);
         }
@@ -251,12 +292,13 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
     wil::com_ptr<IDWriteFontCollection> fontCollection;
     wil::com_ptr<IDWriteRenderingParams1> linearParams;
     f32 gamma = 1.8f;
-    f32 grayscaleEnhancedContrast = 0.5f;
+    f32 cleartypeEnhancedContrast = 0.5f;
+    f32 grayscaleEnhancedContrast = 1.0f;
     {
         THROW_IF_FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(d2dFactory), d2dFactory.put_void()));
         THROW_IF_FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(dwriteFactory), dwriteFactory.put_unknown()));
         THROW_IF_FAILED(dwriteFactory->GetSystemFontCollection(fontCollection.addressof()));
-        DWrite_GetRenderParams(dwriteFactory.get(), &gamma, &grayscaleEnhancedContrast, linearParams.addressof());
+        DWrite_GetRenderParams(dwriteFactory.get(), &gamma, &cleartypeEnhancedContrast, &grayscaleEnhancedContrast, linearParams.addressof());
     }
 
     // D3D setup
@@ -273,7 +315,7 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
             /* pAdapter */ nullptr,
             /* DriverType */ D3D_DRIVER_TYPE_HARDWARE,
             /* Software */ nullptr,
-            /* Flags */ D3D11_CREATE_DEVICE_SINGLETHREADED | D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_DEBUG,
+            /* Flags */ D3D11_CREATE_DEVICE_SINGLETHREADED | D3D11_CREATE_DEVICE_BGRA_SUPPORT,
             /* pFeatureLevels */ &featureLevel,
             /* FeatureLevels */ 1,
             /* SDKVersion */ D3D11_SDK_VERSION,
@@ -332,6 +374,7 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
     f32x4 foreground{ 1.0f, 1.0f, 1.0f, 1.0f };
     char textBuffer[1024]{};
     bool textChanged = true;
+    bool clearType = false;
 
     // DirectWrite results
     wil::com_ptr<ID3D11RenderTargetView> renderTargetView;
@@ -340,9 +383,24 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
     u32x2 tileSize;
     bool constantBufferInvalidated = true;
 
+    // shader hot reload in debug builds
+#ifndef NDEBUG
+    // If you run the project inside Visual Studio it'll have a working directory of $(SolutionDir)\src.
+    std::atomic sourceCodeInvalidationTime{ INT64_MAX };
+    const auto sourceCodeWatcher = wil::make_folder_change_reader_nothrow(L".", false, wil::FolderChangeEvents::FileName | wil::FolderChangeEvents::LastWriteTime, [&](wil::FolderChangeEvent, PCWSTR path) {
+        const auto pathLen = wcslen(path);
+        if (pathLen > 5 && memcmp(path + pathLen - 5, L".hlsl", 10) == 0)
+        {
+            auto expected = INT64_MAX;
+            const auto invalidationTime = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
+            sourceCodeInvalidationTime.compare_exchange_strong(expected, invalidationTime.time_since_epoch().count(), std::memory_order_relaxed);
+        }
+    });
+#endif
+
     for (;;)
     {
-        WaitForSingleObjectEx(frameLatencyWaitableObject.get(), 100, true);
+        WaitForSingleObjectEx(frameLatencyWaitableObject.get(), 10000, true);
 
         {
             bool done = false;
@@ -406,11 +464,15 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
                 ImGui::TextWrapped("^ The upper half shows text drawn with Direct2D for reference.");
                 ImGui::TextWrapped("v The lower half shows text drawn with our custom HLSL shader.");
             }
+            ImGui::Spacing();
             ImGui::Separator();
+            ImGui::Spacing();
             {
                 textChanged |= ImGui::InputTextWithHint("##text", "text", &textBuffer[0], std::size(textBuffer));
             }
+            ImGui::Spacing();
             ImGui::Separator();
+            ImGui::Spacing();
             {
                 if (ImGui::BeginCombo("##font", selectedFontName->c_str()))
                 {
@@ -429,7 +491,15 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
 
                 textChanged |= ImGui::SliderInt("pt", &fontSize, 1, 100);
             }
+            ImGui::Spacing();
             ImGui::Separator();
+            ImGui::Spacing();
+            {
+                textChanged |= ImGui::Checkbox("ClearType", &clearType);
+            }
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
             {
                 textChanged |= ImGui::ColorPicker4("Background", background);
                 ImGui::Spacing();
@@ -476,38 +546,18 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
                 tileSize.y = static_cast<u32>(std::ceil(metrics.height * scale));
             }
 
-            wil::com_ptr<ID3D11Texture2D> d2dTexture;
-            wil::com_ptr<ID3D11Texture2D> d3dTexture;
-            {
-                D3D11_TEXTURE2D_DESC desc{};
-                desc.Width = tileSize.x;
-                desc.Height = tileSize.y;
-                desc.MipLevels = 1;
-                desc.ArraySize = 1;
-                desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-                desc.SampleDesc.Count = 1;
-                desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
-                THROW_IF_FAILED(device->CreateTexture2D(&desc, nullptr, d2dTexture.put()));
-                THROW_IF_FAILED(device->CreateTexture2D(&desc, nullptr, d3dTexture.put()));
-                THROW_IF_FAILED(device->CreateShaderResourceView(d2dTexture.get(), nullptr, d2dTextureView.put()));
-                THROW_IF_FAILED(device->CreateShaderResourceView(d3dTexture.get(), nullptr, d3dTextureView.put()));
-            }
-
             wil::com_ptr<ID2D1RenderTarget> d2dTextureRenderTarget;
             wil::com_ptr<ID2D1RenderTarget> d3dTextureRenderTarget;
-            {
-                D2D1_RENDER_TARGET_PROPERTIES props{};
-                props.type = D2D1_RENDER_TARGET_TYPE_DEFAULT;
-                props.pixelFormat = { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED };
-                props.dpiX = static_cast<f32>(g_dpi);
-                props.dpiY = static_cast<f32>(g_dpi);
-                THROW_IF_FAILED(d2dFactory->CreateDxgiSurfaceRenderTarget(d2dTexture.query<IDXGISurface>().get(), &props, d2dTextureRenderTarget.put()));
-                THROW_IF_FAILED(d2dFactory->CreateDxgiSurfaceRenderTarget(d3dTexture.query<IDXGISurface>().get(), &props, d3dTextureRenderTarget.put()));
+            createD2DRenderTargetTexture(device.get(), d2dFactory.get(), tileSize.x, tileSize.y, g_dpi, d2dTextureRenderTarget.addressof(), d2dTextureView.put());
+            createD2DRenderTargetTexture(device.get(), d2dFactory.get(), tileSize.x, tileSize.y, g_dpi, d3dTextureRenderTarget.addressof(), d3dTextureView.put());
 
-                d2dTextureRenderTarget->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
-                d3dTextureRenderTarget->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
-                d3dTextureRenderTarget->SetTextRenderingParams(linearParams.get());
+            if (clearType)
+            {
+                d2dTextureRenderTarget->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
+                d3dTextureRenderTarget->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
             }
+
+            d3dTextureRenderTarget->SetTextRenderingParams(linearParams.get());
 
             {
                 D2D1_COLOR_F backgroundColor{ background.r, background.g, background.b, background.a };
@@ -518,7 +568,7 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
 
                 d2dTextureRenderTarget->BeginDraw();
                 d2dTextureRenderTarget->Clear(&backgroundColor);
-                d2dTextureRenderTarget->DrawTextLayout({}, textLayout.get(), foregroundBrush.get(), D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
+                d2dTextureRenderTarget->DrawTextLayout({}, textLayout.get(), foregroundBrush.get(), D2D1_DRAW_TEXT_OPTIONS_NONE);
                 THROW_IF_FAILED(d2dTextureRenderTarget->EndDraw());
             }
 
@@ -529,7 +579,7 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
 
                 d3dTextureRenderTarget->BeginDraw();
                 d3dTextureRenderTarget->Clear();
-                d3dTextureRenderTarget->DrawTextLayout({}, textLayout.get(), brush.get(), D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
+                d3dTextureRenderTarget->DrawTextLayout({}, textLayout.get(), brush.get(), D2D1_DRAW_TEXT_OPTIONS_NONE);
                 THROW_IF_FAILED(d3dTextureRenderTarget->EndDraw());
             }
 
@@ -570,9 +620,69 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
             data.background = premultiplyColor(background);
             data.foreground = premultiplyColor(foreground);
             data.gammaRatios = DWrite_GetGammaRatios(gamma);
+            data.cleartypeEnhancedContrast = cleartypeEnhancedContrast;
             data.grayscaleEnhancedContrast = grayscaleEnhancedContrast;
+            data.useClearType = clearType;
             deviceContext->UpdateSubresource(constantBuffer.get(), 0, nullptr, &data, 0, 0);
+
+            constantBufferInvalidated = true;
         }
+
+        // shader hot reload in debug builds
+#ifndef NDEBUG
+        if (const auto invalidationTime = sourceCodeInvalidationTime.load(std::memory_order_relaxed); invalidationTime != INT64_MAX && invalidationTime <= std::chrono::steady_clock::now().time_since_epoch().count())
+        {
+            sourceCodeInvalidationTime.store(INT64_MAX, std::memory_order_relaxed);
+
+            try
+            {
+                static constexpr auto compile = [](const wchar_t* path, const char* target) {
+                    const wil::unique_hfile fileHandle{ CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr) };
+                    THROW_LAST_ERROR_IF(!fileHandle);
+
+                    const auto fileSize = GetFileSize(fileHandle.get(), nullptr);
+                    const wil::unique_handle mappingHandle{ CreateFileMappingW(fileHandle.get(), nullptr, PAGE_READONLY, 0, fileSize, nullptr) };
+                    THROW_LAST_ERROR_IF(!mappingHandle);
+
+                    const wil::unique_mapview_ptr<void> dataBeg{ MapViewOfFile(mappingHandle.get(), FILE_MAP_READ, 0, 0, 0) };
+                    THROW_LAST_ERROR_IF(!dataBeg);
+
+                    wil::com_ptr<ID3DBlob> error;
+                    wil::com_ptr<ID3DBlob> blob;
+                    const auto hr = D3DCompile(
+                        /* pSrcData    */ dataBeg.get(),
+                        /* SrcDataSize */ fileSize,
+                        /* pFileName   */ nullptr,
+                        /* pDefines    */ nullptr,
+                        /* pInclude    */ D3D_COMPILE_STANDARD_FILE_INCLUDE,
+                        /* pEntrypoint */ "main",
+                        /* pTarget     */ target,
+                        /* Flags1      */ D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION | D3DCOMPILE_PACK_MATRIX_COLUMN_MAJOR | D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_WARNINGS_ARE_ERRORS,
+                        /* Flags2      */ 0,
+                        /* ppCode      */ blob.addressof(),
+                        /* ppErrorMsgs */ error.addressof());
+
+                    if (error)
+                    {
+                        std::thread t{ [error = std::move(error)]() noexcept {
+                            MessageBoxA(nullptr, static_cast<const char*>(error->GetBufferPointer()), "Compilation error", MB_SYSTEMMODAL | MB_ICONERROR | MB_OK);
+                        } };
+                        t.detach();
+                    }
+
+                    THROW_IF_FAILED(hr);
+                    return blob;
+                };
+
+                const auto vs = compile(L"main_vs.hlsl", "vs_4_1");
+                const auto ps = compile(L"main_ps.hlsl", "ps_4_1");
+
+                THROW_IF_FAILED(device->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, vertexShader.put()));
+                THROW_IF_FAILED(device->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, pixelShader.put()));
+            }
+            CATCH_LOG()
+        }
+#endif
 
         {
             // Our vertex shader uses a trick from Bill Bilodeau published in "Vertex Shader Tricks"
