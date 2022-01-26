@@ -33,6 +33,7 @@
 #include <thread>
 
 #include "dwrite.h"
+#include "util.h"
 
 static u32x2 g_viewportSize;
 static bool g_viewportSizeChanged = true;
@@ -47,7 +48,7 @@ struct alignas(16) ConstantBuffer
     alignas(sizeof(f32x4)) f32x4 background;
     alignas(sizeof(f32x4)) f32x4 foreground;
 
-    alignas(sizeof(f32x4)) f32x4 gammaRatios;
+    alignas(sizeof(f32x4)) float gammaRatios[4];
     alignas(sizeof(f32)) f32 cleartypeEnhancedContrast = 0;
     alignas(sizeof(f32)) f32 grayscaleEnhancedContrast = 0;
     alignas(sizeof(u32)) u32 useClearType = 0;
@@ -619,7 +620,7 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
             data.tileSize = tileSize;
             data.background = premultiplyColor(background);
             data.foreground = premultiplyColor(foreground);
-            data.gammaRatios = DWrite_GetGammaRatios(gamma);
+            DWrite_GetGammaRatios(gamma, data.gammaRatios);
             data.cleartypeEnhancedContrast = cleartypeEnhancedContrast;
             data.grayscaleEnhancedContrast = grayscaleEnhancedContrast;
             data.useClearType = clearType;

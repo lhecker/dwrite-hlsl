@@ -4,10 +4,10 @@
 #include "dwrite.h"
 
 #include <array>
-#include <cmath>
-#include <utility>
 
 #include <wil/com.h>
+
+#pragma warning(disable : 26429) // Symbol '...' is never tested for nullness, it can be marked as not_null (f.23).
 
 template<typename T>
 constexpr T clamp(T v, T min, T max) noexcept
@@ -40,7 +40,7 @@ void DWrite_GetRenderParams(IDWriteFactory1* factory, float* gamma, float* clear
     THROW_IF_FAILED(factory->CreateCustomRenderingParams(1.0f, 0.0f, 0.0f, defaultParams->GetClearTypeLevel(), defaultParams->GetPixelGeometry(), defaultParams->GetRenderingMode(), linearParams));
 }
 
-// This function produces 4 magic voodoo constants for DWrite_ApplyAlphaCorrection() in dwrite.hlsl
+// This function produces 4 magic constants for DWrite_ApplyAlphaCorrection() in dwrite.hlsl
 // and are required as an argument for DWrite_GetGrayscaleCorrectedAlpha().
 // gamma should be set to the return value of DWrite_GetRenderParams() or (pseudo-code):
 //   IDWriteRenderingParams* defaultParams;
@@ -50,9 +50,9 @@ void DWrite_GetRenderParams(IDWriteFactory1* factory, float* gamma, float* clear
 // gamma is chosen using the gamma value you pick in the "Adjust ClearType text" application.
 // The default value for this are the 1.8 gamma ratios, which equates to:
 //   0.148054421f, -0.894594550f, 1.47590804f, -0.324668258f
-f32x4 DWrite_GetGammaRatios(f32 gamma) noexcept
+void DWrite_GetGammaRatios(float gamma, float (&out)[4]) noexcept
 {
-    static constexpr f32x4 gammaIncorrectTargetRatios[13]{
+    static constexpr float gammaIncorrectTargetRatios[13][4]{
         { 0.0000f / 4.f, 0.0000f / 4.f, 0.0000f / 4.f, 0.0000f / 4.f }, // gamma = 1.0
         { 0.0166f / 4.f, -0.0807f / 4.f, 0.2227f / 4.f, -0.0751f / 4.f }, // gamma = 1.1
         { 0.0350f / 4.f, -0.1760f / 4.f, 0.4325f / 4.f, -0.1370f / 4.f }, // gamma = 1.2
@@ -67,18 +67,19 @@ f32x4 DWrite_GetGammaRatios(f32 gamma) noexcept
         { 0.1908f / 4.f, -1.2652f / 4.f, 1.8650f / 4.f, -0.3476f / 4.f }, // gamma = 2.1
         { 0.2031f / 4.f, -1.3864f / 4.f, 1.9851f / 4.f, -0.3501f / 4.f }, // gamma = 2.2
     };
-    static constexpr auto norm13 = static_cast<f32>(static_cast<double>(0x10000) / (255 * 255) * 4);
-    static constexpr auto norm24 = static_cast<f32>(static_cast<double>(0x100) / (255) * 4);
+    static constexpr auto norm13 = static_cast<float>(static_cast<double>(0x10000) / (255 * 255) * 4);
+    static constexpr auto norm24 = static_cast<float>(static_cast<double>(0x100) / (255) * 4);
 
-    const auto index = clamp<size_t>(static_cast<size_t>(gamma * 10.0f + 0.5f), 10, 22) - 10;
+#pragma warning(suppress : 26451) // Arithmetic overflow: Using operator '+' on a 4 byte value and then casting the result to a 8 byte value.
+    const auto index = clamp<ptrdiff_t>(static_cast<ptrdiff_t>(gamma * 10.0f + 0.5f), 10, 22) - 10;
+#pragma warning(suppress : 26446) // Prefer to use gsl::at() instead of unchecked subscript operator (bounds.4).
+#pragma warning(suppress : 26482) // Only index into arrays using constant expressions (bounds.2).
     const auto& ratios = gammaIncorrectTargetRatios[index];
 
-    return {
-        norm13 * ratios.x,
-        norm24 * ratios.y,
-        norm13 * ratios.z,
-        norm24 * ratios.w,
-    };
+    out[0] = norm13 * ratios[0];
+    out[1] = norm24 * ratios[1];
+    out[2] = norm13 * ratios[2];
+    out[3] = norm24 * ratios[3];
 }
 
 // This belongs to isThinFontFamily().
@@ -117,7 +118,7 @@ static constexpr size_t thinFontFamilyNamesMaxLengthWithNull = 25;
 // See the overloaded alternative version of isThinFontFamily.
 bool DWrite_IsThinFontFamily(const wchar_t* canonicalFamilyName) noexcept
 {
-    int n;
+    int n = 0;
 
     for (const auto familyName : thinFontFamilyNames)
     {
@@ -128,7 +129,6 @@ bool DWrite_IsThinFontFamily(const wchar_t* canonicalFamilyName) noexcept
         }
     }
 
-#pragma warning(suppress : 6001) // Using uninitialized memory 'n'.
     return n == 0;
 }
 

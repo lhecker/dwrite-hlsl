@@ -9,10 +9,8 @@
 
 #include <dwrite_1.h>
 
-#include "util.h"
-
 // See .cpp file for documentation.
 void DWrite_GetRenderParams(IDWriteFactory1* factory, float* gamma, float* cleartypeEnhancedContrast, float* grayscaleEnhancedContrast, IDWriteRenderingParams1** linearParams);
-f32x4 DWrite_GetGammaRatios(f32 gamma) noexcept;
+void DWrite_GetGammaRatios(float gamma, float (&out)[4]) noexcept;
 bool DWrite_IsThinFontFamily(const wchar_t* canonicalFamilyName) noexcept;
 bool DWrite_IsThinFontFamily(IDWriteFontCollection* fontCollection, const wchar_t* familyName);

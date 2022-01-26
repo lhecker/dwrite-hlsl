@@ -12,9 +12,12 @@ float3 DWrite_UnpremultiplyColor(float4 color)
 
 float DWrite_ApplyLightOnDarkContrastAdjustment(float grayscaleEnhancedContrast, float3 color)
 {
-    float lightness = dot(color, float3(0.30f, 0.59f, 0.11f));
-    float multiplier = saturate(4.0f * (0.75f - lightness));
-    return grayscaleEnhancedContrast * multiplier;
+    // The following 1 line is the same as this direct translation of the
+    // original code, but simplified to reduce the number of instructions:
+    //   float lightness = dot(color, float3(0.30f, 0.59f, 0.11f);
+    //   float multiplier = saturate(4.0f * (0.75f - lightness));
+    //   return grayscaleEnhancedContrast * multiplier;
+    return grayscaleEnhancedContrast * saturate(dot(color, float3(0.30f, 0.59f, 0.11f) * -4.0f) + 3.0f);
 }
 
 float DWrite_CalcColorIntensity(float3 color)
@@ -49,7 +52,7 @@ float3 DWrite_ApplyAlphaCorrection3(float3 a, float3 f, float4 g)
 // out of the blending of foregroundColor with glyphAlpha.
 //
 // gammaRatios:
-//   Magic voodoo constants produced by DWrite_GetGammaRatios() in dwrite.cpp.
+//   Magic constants produced by DWrite_GetGammaRatios() in dwrite.cpp.
 //   The default value for this are the 1.8 gamma ratios, which equates to:
 //     0.148054421f, -0.894594550f, 1.47590804f, -0.324668258f
 // grayscaleEnhancedContrast:
@@ -76,7 +79,7 @@ float4 DWrite_GrayscaleBlend(float4 gammaRatios, float grayscaleEnhancedContrast
     float3 foregroundStraight = DWrite_UnpremultiplyColor(foregroundColor);
     float contrastBoost = isThinFont ? 0.5f : 0.0f;
     float blendEnhancedContrast = contrastBoost + DWrite_ApplyLightOnDarkContrastAdjustment(grayscaleEnhancedContrast, foregroundStraight);
-    float intensity = DWrite_CalcColorIntensity(foregroundStraight);
+    float intensity = DWrite_CalcColorIntensity(foregroundColor.rgb);
     float contrasted = DWrite_EnhanceContrast(glyphAlpha, blendEnhancedContrast);
     return foregroundColor * DWrite_ApplyAlphaCorrection(contrasted, intensity, gammaRatios);
 }
@@ -88,7 +91,7 @@ float4 DWrite_GrayscaleBlend(float4 gammaRatios, float grayscaleEnhancedContrast
 // of foregroundColor and backgroundColor using glyphColor to do sub-pixel AA.
 //
 // gammaRatios:
-//   Magic voodoo constants produced by DWrite_GetGammaRatios() in dwrite.cpp.
+//   Magic constants produced by DWrite_GetGammaRatios() in dwrite.cpp.
 //   The default value for this are the 1.8 gamma ratios, which equates to:
 //     0.148054421f, -0.894594550f, 1.47590804f, -0.324668258f
 // enhancedContrast:

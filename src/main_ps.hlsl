@@ -24,8 +24,8 @@ Texture2D<float4> d3dTexture : register(t1);
 
 float4 alphaBlendPremultiplied(float4 bottom, float4 top)
 {
-    float ia = 1 - top.a;
-    return float4(bottom.rgb * ia + top.rgb, bottom.a * ia + top.a);
+    bottom *= 1 - top.a;
+    return bottom + top;
 }
 
 // clang-format off
@@ -47,12 +47,15 @@ float4 main(float4 pos: SV_Position): SV_Target
     // The texture drawn with D2D will be shown as it is.
     // It's already blended with the background and is for comparison only.
     float4 d2dColor = d2dTexture[tilePos];
-    
+
     // This applies the internal DirectWrite alpha blending algorithm.
     float4 d3dColor;
-    if (useClearType) {
+    if (useClearType)
+    {
         d3dColor = DWrite_CleartypeBlend(gammaRatios, cleartypeEnhancedContrast, false, background, foreground, d3dTexture[tilePos]);
-    } else {
+    }
+    else
+    {
         float4 c = DWrite_GrayscaleBlend(gammaRatios, grayscaleEnhancedContrast, false, foreground, d3dTexture[tilePos].a);
         d3dColor = alphaBlendPremultiplied(background, c);
     }
