@@ -1,15 +1,11 @@
 # dwrite-hlsl
 
 This project demonstrates how to blend text in a HLSL shader and have it look like native DirectWrite.
+It implements both, ClearType (`D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE`) and grayscale (`D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE`) anti-aliasing.
 
 ## License
 
 This project is an extract of [Windows Terminal](https://github.com/microsoft/terminal). See [LICENSE](./LICENSE).
-
-## Implemented features
-
-* Correctly blending pre-rendered glyphs from a texture atlas with RGBA background and foreground colors in a shader and have it look identical to native DirectWrite/Direct2D.
-* Support for grayscale-antialiased Glyphs
 
 ## Missing features
 
