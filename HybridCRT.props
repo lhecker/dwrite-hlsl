@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!--
+    Windows App SDK coined this the "Hybrid CRT" model and that's the search term to use if needed.
+    But really, all this does is to dynamically link with the CRT (C), because that one is
+    always present on Windows, and statically with the vcruntime (C++), because that one isn't.
+    If you need this for Debug builds, replace:
+    * MultiThreaded -> MultiThreadedDebug
+    * libucrt -> libucrtd
+    * ucrt -> ucrtd
+  -->
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
+    <ClCompile>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries);libucrt.lib</IgnoreSpecificDefaultLibraries>
+      <AdditionalOptions>%(AdditionalOptions) /defaultlib:ucrt.lib</AdditionalOptions>
+    </Link>
+  </ItemDefinitionGroup>
+</Project>
