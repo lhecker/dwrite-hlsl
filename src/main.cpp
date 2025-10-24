@@ -81,6 +81,23 @@ static f32x4 premultiplyColor(const f32x4& in) noexcept
     return { in.r * in.a, in.g * in.a, in.b * in.a, in.a };
 }
 
+static f32x4 sRGBToLinear(f32x4 in) noexcept
+{
+    for (int i = 0; i < 3; i++)
+    {
+        auto& c = in[i];
+        if (c <= 0.04045f)
+        {
+            c /= 12.92f;
+        }
+        else
+        {
+            c = std::pow((c + 0.055f) / 1.055f, 2.4f);
+        }
+    }
+    return in;
+}
+
 const D2D1_COLOR_F& asD2DColor(const f32x4& color) noexcept
 {
     return *reinterpret_cast<const D2D1_COLOR_F*>(&color);
@@ -150,7 +167,7 @@ static const std::string* getFontNameRefFromCollection(const std::vector<std::st
     return &fontNames[0];
 }
 
-static void createD2DRenderTargetTexture(ID3D11Device* device, ID2D1Factory* d2dFactory, UINT width, UINT height, UINT dpi, ID2D1RenderTarget** renderTarget, ID3D11ShaderResourceView** textureView)
+static void createD2DRenderTargetTexture(ID3D11Device* device, ID2D1Factory* d2dFactory, DXGI_FORMAT format, UINT width, UINT height, UINT dpi, ID2D1RenderTarget** renderTarget, ID3D11ShaderResourceView** textureView)
 {
     wil::com_ptr<ID3D11Texture2D> texture;
     {
@@ -159,7 +176,7 @@ static void createD2DRenderTargetTexture(ID3D11Device* device, ID2D1Factory* d2d
             .Height = height,
             .MipLevels = 1,
             .ArraySize = 1,
-            .Format = DXGI_FORMAT_B8G8R8A8_UNORM,
+            .Format = format,
             .SampleDesc = { .Count = 1 },
             .BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET,
         };
@@ -173,7 +190,7 @@ static void createD2DRenderTargetTexture(ID3D11Device* device, ID2D1Factory* d2d
     {
         const D2D1_RENDER_TARGET_PROPERTIES props{
             .type = D2D1_RENDER_TARGET_TYPE_DEFAULT,
-            .pixelFormat = { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED },
+            .pixelFormat = { format, D2D1_ALPHA_MODE_PREMULTIPLIED },
             .dpiX = static_cast<f32>(dpi),
             .dpiY = static_cast<f32>(dpi),
         };
@@ -375,11 +392,12 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
     const auto fontNames = getSystemFontNames(fontCollection.get(), &localeName[0]);
     auto selectedFontName = getFontNameRefFromCollection(fontNames, "Consolas");
     int fontSize = 12;
-    f32x4 background{ 0.0f, 0.0f, 0.0f, 1.0f };
-    f32x4 foreground{ 1.0f, 1.0f, 1.0f, 1.0f };
+    f32x4 background{ 1.0f, 1.0f, 1.0f, 1.0f };
+    f32x4 foreground{ 0.0f, 0.0f, 0.0f, 1.0f };
     char textBuffer[1024]{};
     bool textChanged = true;
     bool clearType = false;
+    bool srgb = false;
 
     // DirectWrite results
     wil::com_ptr<ID3D11RenderTargetView> renderTargetView;
@@ -486,6 +504,11 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
             ImGui::Spacing();
             {
                 textChanged |= ImGui::Checkbox("ClearType", &clearType);
+                if (ImGui::Checkbox("sRGB Render Target", &srgb))
+                {
+                    textChanged = true;
+                    g_viewportSizeChanged = true; // force recreation of render targets
+                }
             }
             ImGui::Spacing();
             ImGui::Separator();
@@ -538,8 +561,8 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
 
             wil::com_ptr<ID2D1RenderTarget> d2dTextureRenderTarget;
             wil::com_ptr<ID2D1RenderTarget> d3dTextureRenderTarget;
-            createD2DRenderTargetTexture(device.get(), d2dFactory.get(), tileSize.x, tileSize.y, g_dpi, d2dTextureRenderTarget.addressof(), d2dTextureView.put());
-            createD2DRenderTargetTexture(device.get(), d2dFactory.get(), tileSize.x, tileSize.y, g_dpi, d3dTextureRenderTarget.addressof(), d3dTextureView.put());
+            createD2DRenderTargetTexture(device.get(), d2dFactory.get(), srgb ? DXGI_FORMAT_B8G8R8A8_UNORM_SRGB : DXGI_FORMAT_B8G8R8A8_UNORM, tileSize.x, tileSize.y, g_dpi, d2dTextureRenderTarget.addressof(), d2dTextureView.put());
+            createD2DRenderTargetTexture(device.get(), d2dFactory.get(), DXGI_FORMAT_B8G8R8A8_UNORM, tileSize.x, tileSize.y, g_dpi, d3dTextureRenderTarget.addressof(), d3dTextureView.put());
 
             if (clearType)
             {
@@ -550,11 +573,13 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
             d3dTextureRenderTarget->SetTextRenderingParams(linearParams.get());
 
             {
+                const auto b = srgb ? sRGBToLinear(background) : background;
+                const auto f = srgb ? sRGBToLinear(foreground) : foreground;
                 wil::com_ptr<ID2D1SolidColorBrush> foregroundBrush;
-                THROW_IF_FAILED(d2dTextureRenderTarget->CreateSolidColorBrush(&asD2DColor(foreground), nullptr, foregroundBrush.addressof()));
+                THROW_IF_FAILED(d2dTextureRenderTarget->CreateSolidColorBrush(&asD2DColor(f), nullptr, foregroundBrush.addressof()));
 
                 d2dTextureRenderTarget->BeginDraw();
-                d2dTextureRenderTarget->Clear(&asD2DColor(background));
+                d2dTextureRenderTarget->Clear(&asD2DColor(b));
                 d2dTextureRenderTarget->DrawTextLayout({}, textLayout.get(), foregroundBrush.get(), D2D1_DRAW_TEXT_OPTIONS_NONE);
                 THROW_IF_FAILED(d2dTextureRenderTarget->EndDraw());
             }
@@ -588,7 +613,7 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
             THROW_IF_FAILED(swapChain->GetBuffer(0, __uuidof(buffer), buffer.put_void()));
 
             const D3D11_RENDER_TARGET_VIEW_DESC desc{
-                .Format = DXGI_FORMAT_B8G8R8A8_UNORM,
+                .Format = srgb ? DXGI_FORMAT_B8G8R8A8_UNORM_SRGB : DXGI_FORMAT_B8G8R8A8_UNORM,
                 .ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D,
             };
             THROW_IF_FAILED(device->CreateRenderTargetView(buffer.get(), &desc, renderTargetView.put()));
@@ -611,12 +636,22 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
             data.tileSize = tileSize;
             data.background = premultiplyColor(background);
             data.foreground = premultiplyColor(foreground);
-            DWrite_GetGammaRatios(gamma, data.gammaRatios);
             data.cleartypeEnhancedContrast = cleartypeEnhancedContrast;
             data.grayscaleEnhancedContrast = grayscaleEnhancedContrast;
             data.useClearType = clearType;
-            deviceContext->UpdateSubresource(constantBuffer.get(), 0, nullptr, &data, 0, 0);
 
+            if (srgb)
+            {
+                data.background = sRGBToLinear(data.background);
+                data.foreground = sRGBToLinear(data.foreground);
+                DWrite_GetGammaRatiosForLinearTarget(gamma, data.gammaRatios);
+            }
+            else
+            {
+                DWrite_GetGammaRatiosForEncodedTarget(gamma, data.gammaRatios);
+            }
+
+            deviceContext->UpdateSubresource(constantBuffer.get(), 0, nullptr, &data, 0, 0);
             constantBufferInvalidated = true;
         }
 

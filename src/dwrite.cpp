@@ -13,17 +13,6 @@ constexpr T clamp(T v, T min, T max) noexcept
     return std::max(min, std::min(max, v));
 }
 
-// The gamma and grayscaleEnhancedContrast values are required for DWrite_GetGrayscaleCorrectedAlpha().
-// in shader.hlsl later and can be passed in your cbuffer for instance.
-// The returned linearParams object can be passed to various DirectWrite/D2D
-// methods, like ID2D1RenderTarget::SetTextRenderingParams for instance.
-//
-// DirectWrite's alpha blending is gamma corrected and thus text color dependent.
-// In order to do such blending in our shader we have to disable gamma compensation inside DirectWrite/Direct2D.
-// If we didn't we'd apply the correction twice and the result would look wrong.
-//
-// Under Windows applications aren't expected to refresh the rendering params after startup,
-// allowing you to cache these values for the lifetime of your application.
 void DWrite_GetRenderParams(IDWriteFactory1* factory, float* gamma, float* cleartypeEnhancedContrast, float* grayscaleEnhancedContrast, IDWriteRenderingParams1** linearParams)
 {
     // If you're concerned with crash resilience don't use reinterpret_cast
@@ -38,33 +27,47 @@ void DWrite_GetRenderParams(IDWriteFactory1* factory, float* gamma, float* clear
     THROW_IF_FAILED(factory->CreateCustomRenderingParams(1.0f, 0.0f, 0.0f, defaultParams->GetClearTypeLevel(), defaultParams->GetPixelGeometry(), defaultParams->GetRenderingMode(), linearParams));
 }
 
-// This function produces 4 magic constants for DWrite_ApplyAlphaCorrection() in dwrite.hlsl
-// and are required as an argument for DWrite_GetGrayscaleCorrectedAlpha().
-// gamma should be set to the return value of DWrite_GetRenderParams() or (pseudo-code):
-//   IDWriteRenderingParams* defaultParams;
-//   dwriteFactory->CreateRenderingParams(&defaultParams);
-//   gamma = defaultParams->GetGamma();
+// The following tables are taken from directly from DirectWrite and were not modified.
 //
-// gamma is chosen using the gamma value you pick in the "Adjust ClearType text" application.
-// The default value for this are the 1.8 gamma ratios, which equates to:
-//   0.148054421f, -0.894594550f, 1.47590804f, -0.324668258f
-void DWrite_GetGammaRatios(float gamma, float (&out)[4]) noexcept
+// The ratios are divided by 4, in order to avoid overflow in pixel shaders.
+// They're derived programmatically with the following intent:
+// > [The derive code] was used to figure out how best to simulate gamma correction for text given that in a pixel
+// > shader we cannot implement true blending functions... to do so would require reading back from the backbuffer.
+// > [The chosen solution] uses the foreground color of the brush to determine how best to alter the
+// > alpha channel in order to simulate a conversion of the render target to 1.0 space for blending.
+static constexpr float sc_gammaIncorrectTargetRatios[13][4]{
+    { 0.0000f / 4.f, -0.0000f / 4.f, 0.0000f / 4.f, -0.0000f / 4.f }, // gamma = 1.0
+    { 0.0166f / 4.f, -0.0807f / 4.f, 0.2227f / 4.f, -0.0751f / 4.f }, // gamma = 1.1
+    { 0.0350f / 4.f, -0.1760f / 4.f, 0.4325f / 4.f, -0.1370f / 4.f }, // gamma = 1.2
+    { 0.0543f / 4.f, -0.2821f / 4.f, 0.6302f / 4.f, -0.1876f / 4.f }, // gamma = 1.3
+    { 0.0739f / 4.f, -0.3963f / 4.f, 0.8167f / 4.f, -0.2287f / 4.f }, // gamma = 1.4
+    { 0.0933f / 4.f, -0.5161f / 4.f, 0.9926f / 4.f, -0.2616f / 4.f }, // gamma = 1.5
+    { 0.1121f / 4.f, -0.6395f / 4.f, 1.1588f / 4.f, -0.2877f / 4.f }, // gamma = 1.6
+    { 0.1300f / 4.f, -0.7649f / 4.f, 1.3159f / 4.f, -0.3080f / 4.f }, // gamma = 1.7
+    { 0.1469f / 4.f, -0.8911f / 4.f, 1.4644f / 4.f, -0.3234f / 4.f }, // gamma = 1.8
+    { 0.1627f / 4.f, -1.0170f / 4.f, 1.6051f / 4.f, -0.3347f / 4.f }, // gamma = 1.9
+    { 0.1773f / 4.f, -1.1420f / 4.f, 1.7385f / 4.f, -0.3426f / 4.f }, // gamma = 2.0
+    { 0.1908f / 4.f, -1.2652f / 4.f, 1.8650f / 4.f, -0.3476f / 4.f }, // gamma = 2.1
+    { 0.2031f / 4.f, -1.3864f / 4.f, 1.9851f / 4.f, -0.3501f / 4.f }, // gamma = 2.2
+};
+static constexpr float sc_gammaCorrectTargetRatios[13][4]{
+    { 0.0256f / 4.f, -0.1020f / 4.f, -1.5787f / 4.f, 0.8339f / 4.f }, // gamma = 1.0
+    { 0.0105f / 4.f, -0.0428f / 4.f, -1.4340f / 4.f, 0.7358f / 4.f }, // gamma = 1.1
+    { -0.0009f / 4.f, 0.0038f / 4.f, -1.2934f / 4.f, 0.6450f / 4.f }, // gamma = 1.2
+    { -0.0092f / 4.f, 0.0392f / 4.f, -1.1567f / 4.f, 0.5610f / 4.f }, // gamma = 1.3
+    { -0.0147f / 4.f, 0.0644f / 4.f, -1.0238f / 4.f, 0.4834f / 4.f }, // gamma = 1.4
+    { -0.0178f / 4.f, 0.0804f / 4.f, -0.8946f / 4.f, 0.4115f / 4.f }, // gamma = 1.5
+    { -0.0189f / 4.f, 0.0881f / 4.f, -0.7689f / 4.f, 0.3451f / 4.f }, // gamma = 1.6
+    { -0.0182f / 4.f, 0.0882f / 4.f, -0.6467f / 4.f, 0.2838f / 4.f }, // gamma = 1.7
+    { -0.0160f / 4.f, 0.0816f / 4.f, -0.5278f / 4.f, 0.2271f / 4.f }, // gamma = 1.8
+    { -0.0124f / 4.f, 0.0687f / 4.f, -0.4122f / 4.f, 0.1749f / 4.f }, // gamma = 1.9
+    { -0.0078f / 4.f, 0.0503f / 4.f, -0.2998f / 4.f, 0.1267f / 4.f }, // gamma = 2.0
+    { -0.0022f / 4.f, 0.0270f / 4.f, -0.1904f / 4.f, 0.0823f / 4.f }, // gamma = 2.1
+    { 0.0042f / 4.f, -0.0009f / 4.f, -0.0840f / 4.f, 0.0414f / 4.f }, // gamma = 2.2
+};
+
+static void DWrite_GetGammaRatios(float gamma, float (&out)[4], const float (&table)[13][4]) noexcept
 {
-    static constexpr float gammaIncorrectTargetRatios[13][4]{
-        { 0.0000f / 4.f, 0.0000f / 4.f, 0.0000f / 4.f, 0.0000f / 4.f }, // gamma = 1.0
-        { 0.0166f / 4.f, -0.0807f / 4.f, 0.2227f / 4.f, -0.0751f / 4.f }, // gamma = 1.1
-        { 0.0350f / 4.f, -0.1760f / 4.f, 0.4325f / 4.f, -0.1370f / 4.f }, // gamma = 1.2
-        { 0.0543f / 4.f, -0.2821f / 4.f, 0.6302f / 4.f, -0.1876f / 4.f }, // gamma = 1.3
-        { 0.0739f / 4.f, -0.3963f / 4.f, 0.8167f / 4.f, -0.2287f / 4.f }, // gamma = 1.4
-        { 0.0933f / 4.f, -0.5161f / 4.f, 0.9926f / 4.f, -0.2616f / 4.f }, // gamma = 1.5
-        { 0.1121f / 4.f, -0.6395f / 4.f, 1.1588f / 4.f, -0.2877f / 4.f }, // gamma = 1.6
-        { 0.1300f / 4.f, -0.7649f / 4.f, 1.3159f / 4.f, -0.3080f / 4.f }, // gamma = 1.7
-        { 0.1469f / 4.f, -0.8911f / 4.f, 1.4644f / 4.f, -0.3234f / 4.f }, // gamma = 1.8
-        { 0.1627f / 4.f, -1.0170f / 4.f, 1.6051f / 4.f, -0.3347f / 4.f }, // gamma = 1.9
-        { 0.1773f / 4.f, -1.1420f / 4.f, 1.7385f / 4.f, -0.3426f / 4.f }, // gamma = 2.0
-        { 0.1908f / 4.f, -1.2652f / 4.f, 1.8650f / 4.f, -0.3476f / 4.f }, // gamma = 2.1
-        { 0.2031f / 4.f, -1.3864f / 4.f, 1.9851f / 4.f, -0.3501f / 4.f }, // gamma = 2.2
-    };
     static constexpr auto norm13 = static_cast<float>(static_cast<double>(0x10000) / (255 * 255) * 4);
     static constexpr auto norm24 = static_cast<float>(static_cast<double>(0x100) / (255) * 4);
 
@@ -72,12 +75,22 @@ void DWrite_GetGammaRatios(float gamma, float (&out)[4]) noexcept
     const auto index = clamp<ptrdiff_t>(static_cast<ptrdiff_t>(gamma * 10.0f + 0.5f), 10, 22) - 10;
 #pragma warning(suppress : 26446) // Prefer to use gsl::at() instead of unchecked subscript operator (bounds.4).
 #pragma warning(suppress : 26482) // Only index into arrays using constant expressions (bounds.2).
-    const auto& ratios = gammaIncorrectTargetRatios[index];
+    const auto& ratios = table[index];
 
     out[0] = norm13 * ratios[0];
     out[1] = norm24 * ratios[1];
     out[2] = norm13 * ratios[2];
     out[3] = norm24 * ratios[3];
+}
+
+void DWrite_GetGammaRatiosForLinearTarget(float gamma, float (&out)[4]) noexcept
+{
+    DWrite_GetGammaRatios(gamma, out, sc_gammaCorrectTargetRatios);
+}
+
+void DWrite_GetGammaRatiosForEncodedTarget(float gamma, float (&out)[4]) noexcept
+{
+    DWrite_GetGammaRatios(gamma, out, sc_gammaIncorrectTargetRatios);
 }
 
 // This belongs to isThinFontFamily().
@@ -93,27 +106,6 @@ static constexpr const wchar_t* thinFontFamilyNames[]{
 };
 static constexpr size_t thinFontFamilyNamesMaxLengthWithNull = 25;
 
-// DWrite_IsThinFontFamily returns true if the specified family name is in our hard-coded list of "thin fonts".
-// These are fonts that require special rendering because their strokes are too thin.
-//
-// The history of these fonts is interesting. The glyph outlines were originally created by digitizing the typeballs of
-// IBM Selectric typewriters. Digitizing the metal typeballs yielded very precise outlines. However, the strokes are
-// consistently too thin in comparison with the corresponding typewritten characters because the thickness of the
-// typewriter ribbon was not accounted for. This didn't matter in the earliest versions of Windows because the screen
-// resolution was not that high and you could not have a stroke thinner than one pixel. However, with the introduction
-// of anti-aliasing the thin strokes manifested in text that was too light. By this time, it was too late to change
-// the fonts so instead a special case was added to render these fonts differently.
-//
-// ---
-//
-// The canonical family name is a font's family English name, when
-// * There's a corresponding font face name with the same language ID
-// * If multiple such pairs exist, en-us is preferred
-// * Otherwise (if en-us is not a translation) it's the lowest LCID
-//
-// However my (lhecker) understanding is that none of the thinFontFamilyNames come without an en-us translation.
-// As such you can simply get the en-us name of the font from a IDWriteFontCollection for instance.
-// See the overloaded alternative version of isThinFontFamily.
 bool DWrite_IsThinFontFamily(const wchar_t* canonicalFamilyName) noexcept
 {
     int n = 0;
@@ -130,10 +122,6 @@ bool DWrite_IsThinFontFamily(const wchar_t* canonicalFamilyName) noexcept
     return n == 0;
 }
 
-// The actual DWrite_IsThinFontFamily() expects you to pass a "canonical" family name,
-// which technically isn't that trivial to determine. This function might help you with that.
-// Just give it the font collection you use and any family name from that collection.
-// (For instance from IDWriteFactory::GetSystemFontCollection.)
 bool DWrite_IsThinFontFamily(IDWriteFontCollection* fontCollection, const wchar_t* familyName)
 {
     UINT32 index;

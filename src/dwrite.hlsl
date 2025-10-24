@@ -52,9 +52,8 @@ float3 DWrite_ApplyAlphaCorrection3(float3 a, float3 f, float4 g)
 // out of the blending of foregroundColor with glyphAlpha.
 //
 // gammaRatios:
-//   Magic constants produced by DWrite_GetGammaRatios() in dwrite.cpp.
-//   The default value for this are the 1.8 gamma ratios, which equates to:
-//     0.148054421f, -0.894594550f, 1.47590804f, -0.324668258f
+//   Magic constants produced by DWrite_GetGammaRatios*() in dwrite.cpp.
+//   If not configured by the user, the Windows default values are the 1.8 gamma ratios.
 // grayscaleEnhancedContrast:
 //   An additional contrast boost, making the font lighter/darker.
 //   The default value for this is 1.0f.
@@ -74,6 +73,17 @@ float3 DWrite_ApplyAlphaCorrection3(float3 a, float3 f, float4 g)
 //   The text's foreground color in premultiplied alpha.
 // glyphAlpha:
 //   The alpha value of the current glyph pixel in your texture atlas.
+//   NOTE: Don't use DXGI_FORMAT_B8G8R8A8_UNORM_SRGB or similar for your glyph atlas.
+//   Otherwise, you'd apply gamma correction twice (once during texture load and then here again).
+//
+// Fun fact: If you take the "gammaCorrectTargetRatios" for gamma 1.0 and calculate just:
+//   color = UnpremultiplyColor(color);
+//   float4 g = float4(0.0256f, -0.1020f, -1.5787f, 0.8339f); // 1.0 gamma
+//   float f = DWrite_CalcColorIntensity(color);
+//   color.a = DWrite_ApplyAlphaCorrection(color.a, f, g);
+//   return PremultiplyColor(color);
+// ...you can simulate blending in 2.2 gamma space.
+// This is what DWM does for blending SDR into a HDR target.
 float4 DWrite_GrayscaleBlend(float4 gammaRatios, float grayscaleEnhancedContrast, bool isThinFont, float4 foregroundColor, float glyphAlpha)
 {
     float3 foregroundStraight = DWrite_UnpremultiplyColor(foregroundColor);
@@ -91,9 +101,8 @@ float4 DWrite_GrayscaleBlend(float4 gammaRatios, float grayscaleEnhancedContrast
 // of foregroundColor and backgroundColor using glyphColor to do sub-pixel AA.
 //
 // gammaRatios:
-//   Magic constants produced by DWrite_GetGammaRatios() in dwrite.cpp.
-//   The default value for this are the 1.8 gamma ratios, which equates to:
-//     0.148054421f, -0.894594550f, 1.47590804f, -0.324668258f
+//   Magic constants produced by DWrite_GetGammaRatios*() in dwrite.cpp.
+//   The default value for this are again the 1.8 gamma ratios.
 // enhancedContrast:
 //   An additional contrast boost, making the font lighter/darker.
 //   The default value for this is 0.5f.
@@ -115,6 +124,8 @@ float4 DWrite_GrayscaleBlend(float4 gammaRatios, float grayscaleEnhancedContrast
 //   The text's foreground color in premultiplied alpha.
 // glyphAlpha:
 //   The RGB color of the current glyph pixel in your texture atlas.
+//   NOTE: Don't use DXGI_FORMAT_B8G8R8A8_UNORM_SRGB or similar for your glyph atlas.
+//   Otherwise, you'd apply gamma correction twice (once during texture load and then here again).
 //   The A value is ignored, because ClearType doesn't work with alpha blending.
 //   RGB is required because ClearType performs sub-pixel AA. The most common ClearType drawing type is 6x1
 //   overscale (meaning: the glyph is rasterized with 6x the required resolution in the X axis) and thus
