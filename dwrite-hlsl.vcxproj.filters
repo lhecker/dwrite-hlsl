@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="imgui">
@@ -11,28 +11,28 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="deps\imgui-3fde445\imconfig.h">
+    <ClInclude Include="deps\imgui\imconfig.h">
       <Filter>imgui</Filter>
     </ClInclude>
-    <ClInclude Include="deps\imgui-3fde445\imgui.h">
+    <ClInclude Include="deps\imgui\imgui.h">
       <Filter>imgui</Filter>
     </ClInclude>
-    <ClInclude Include="deps\imgui-3fde445\imgui_internal.h">
+    <ClInclude Include="deps\imgui\imgui_internal.h">
       <Filter>imgui</Filter>
     </ClInclude>
-    <ClInclude Include="deps\imgui-3fde445\imstb_rectpack.h">
+    <ClInclude Include="deps\imgui\imstb_rectpack.h">
       <Filter>imgui</Filter>
     </ClInclude>
-    <ClInclude Include="deps\imgui-3fde445\imstb_textedit.h">
+    <ClInclude Include="deps\imgui\imstb_textedit.h">
       <Filter>imgui</Filter>
     </ClInclude>
-    <ClInclude Include="deps\imgui-3fde445\imstb_truetype.h">
+    <ClInclude Include="deps\imgui\imstb_truetype.h">
       <Filter>imgui</Filter>
     </ClInclude>
-    <ClInclude Include="deps\imgui-3fde445\backends\imgui_impl_dx11.h">
+    <ClInclude Include="deps\imgui\backends\imgui_impl_dx11.h">
       <Filter>imgui</Filter>
     </ClInclude>
-    <ClInclude Include="deps\imgui-3fde445\backends\imgui_impl_win32.h">
+    <ClInclude Include="deps\imgui\backends\imgui_impl_win32.h">
       <Filter>imgui</Filter>
     </ClInclude>
     <ClInclude Include="src\util.h">
@@ -46,22 +46,22 @@
     <ClCompile Include="src\main.cpp">
       <Filter>src</Filter>
     </ClCompile>
-    <ClCompile Include="deps\imgui-3fde445\imgui.cpp">
+    <ClCompile Include="deps\imgui\imgui.cpp">
       <Filter>imgui</Filter>
     </ClCompile>
-    <ClCompile Include="deps\imgui-3fde445\imgui_draw.cpp">
+    <ClCompile Include="deps\imgui\imgui_draw.cpp">
       <Filter>imgui</Filter>
     </ClCompile>
-    <ClCompile Include="deps\imgui-3fde445\imgui_tables.cpp">
+    <ClCompile Include="deps\imgui\imgui_tables.cpp">
       <Filter>imgui</Filter>
     </ClCompile>
-    <ClCompile Include="deps\imgui-3fde445\imgui_widgets.cpp">
+    <ClCompile Include="deps\imgui\imgui_widgets.cpp">
       <Filter>imgui</Filter>
     </ClCompile>
-    <ClCompile Include="deps\imgui-3fde445\backends\imgui_impl_dx11.cpp">
+    <ClCompile Include="deps\imgui\backends\imgui_impl_dx11.cpp">
       <Filter>imgui</Filter>
     </ClCompile>
-    <ClCompile Include="deps\imgui-3fde445\backends\imgui_impl_win32.cpp">
+    <ClCompile Include="deps\imgui\backends\imgui_impl_win32.cpp">
       <Filter>imgui</Filter>
     </ClCompile>
     <ClCompile Include="src\dwrite.cpp">

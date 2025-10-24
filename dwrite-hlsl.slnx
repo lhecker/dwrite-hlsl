@@ -1,0 +1,8 @@
+<Solution>
+  <Configurations>
+    <Platform Name="ARM64" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="dwrite-hlsl.vcxproj" Id="431a08f3-d40b-49ff-ade8-ecc47172b639" />
+</Solution>

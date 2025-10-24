@@ -1,9 +1,6 @@
-/_ReSharper.Caches
 /.vs
 /.vscode
-/ARM64
-/Debug
-/Release
-/x64
+/bin
+/obj
 imgui.ini
 *.user

@@ -9,28 +9,22 @@
 #include <dwmapi.h>
 #include <d2d1.h>
 #include <d3d11_2.h>
-#include <dwrite_1.h>
 
 #include <algorithm>
 #include <array>
-#include <atomic>
-#include <chrono>
 #include <cmath>
 #include <string>
 #include <vector>
 
 // wil
 #include <wil/com.h>
-#include <wil/filesystem.h>
 // imgui
 #include <imgui.h>
 #include <backends/imgui_impl_dx11.h>
 #include <backends/imgui_impl_win32.h>
 // our stuff
-#include <d3dcompiler.h>
 #include <main_vs.h>
 #include <main_ps.h>
-#include <thread>
 
 #include "dwrite.h"
 #include "util.h"
@@ -85,6 +79,11 @@ static std::string u16u8(const std::wstring_view& input)
 static f32x4 premultiplyColor(const f32x4& in) noexcept
 {
     return { in.r * in.a, in.g * in.a, in.b * in.a, in.a };
+}
+
+const D2D1_COLOR_F& asD2DColor(const f32x4& color) noexcept
+{
+    return *reinterpret_cast<const D2D1_COLOR_F*>(&color);
 }
 
 static std::vector<std::string> getSystemFontNames(IDWriteFontCollection* fontCollection, const wchar_t* localeName)
@@ -155,14 +154,15 @@ static void createD2DRenderTargetTexture(ID3D11Device* device, ID2D1Factory* d2d
 {
     wil::com_ptr<ID3D11Texture2D> texture;
     {
-        D3D11_TEXTURE2D_DESC desc{};
-        desc.Width = width;
-        desc.Height = height;
-        desc.MipLevels = 1;
-        desc.ArraySize = 1;
-        desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-        desc.SampleDesc.Count = 1;
-        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+        const D3D11_TEXTURE2D_DESC desc{
+            .Width = width,
+            .Height = height,
+            .MipLevels = 1,
+            .ArraySize = 1,
+            .Format = DXGI_FORMAT_B8G8R8A8_UNORM,
+            .SampleDesc = { .Count = 1 },
+            .BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET,
+        };
         THROW_IF_FAILED(device->CreateTexture2D(&desc, nullptr, texture.addressof()));
     }
 
@@ -171,11 +171,12 @@ static void createD2DRenderTargetTexture(ID3D11Device* device, ID2D1Factory* d2d
 
     wil::com_ptr<ID2D1RenderTarget> renderTargetPtr;
     {
-        D2D1_RENDER_TARGET_PROPERTIES props{};
-        props.type = D2D1_RENDER_TARGET_TYPE_DEFAULT;
-        props.pixelFormat = { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED };
-        props.dpiX = static_cast<f32>(dpi);
-        props.dpiY = static_cast<f32>(dpi);
+        const D2D1_RENDER_TARGET_PROPERTIES props{
+            .type = D2D1_RENDER_TARGET_TYPE_DEFAULT,
+            .pixelFormat = { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED },
+            .dpiX = static_cast<f32>(dpi),
+            .dpiY = static_cast<f32>(dpi),
+        };
         THROW_IF_FAILED(d2dFactory->CreateDxgiSurfaceRenderTarget(texture.query<IDXGISurface>().get(), &props, renderTargetPtr.addressof()));
     }
 
@@ -266,19 +267,20 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
     // Win32 setup
     wil::unique_hwnd hwnd;
     {
-        WNDCLASSEXW wcex;
-        wcex.cbSize = sizeof(WNDCLASSEX);
-        wcex.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
-        wcex.lpfnWndProc = WndProc;
-        wcex.cbClsExtra = 0;
-        wcex.cbWndExtra = 0;
-        wcex.hInstance = hInstance;
-        wcex.hIcon = nullptr;
-        wcex.hCursor = LoadCursor(nullptr, IDC_ARROW);
-        wcex.hbrBackground = nullptr;
-        wcex.lpszMenuName = nullptr;
-        wcex.lpszClassName = L"dwrite-hlsl";
-        wcex.hIconSm = nullptr;
+        const WNDCLASSEXW wcex{
+            .cbSize = sizeof(WNDCLASSEX),
+            .style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC,
+            .lpfnWndProc = WndProc,
+            .cbClsExtra = 0,
+            .cbWndExtra = 0,
+            .hInstance = hInstance,
+            .hIcon = nullptr,
+            .hCursor = LoadCursor(nullptr, IDC_ARROW),
+            .hbrBackground = nullptr,
+            .lpszMenuName = nullptr,
+            .lpszClassName = L"dwrite-hlsl",
+            .hIconSm = nullptr,
+        };
         RegisterClassExW(&wcex);
 
         hwnd.reset(THROW_LAST_ERROR_IF_NULL(CreateWindowExW(0L, L"dwrite-hlsl", L"dwrite-hlsl", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr)));
@@ -313,26 +315,27 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
     {
         static constexpr D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_0;
         THROW_IF_FAILED(D3D11CreateDevice(
-            /* pAdapter */ nullptr,
-            /* DriverType */ D3D_DRIVER_TYPE_HARDWARE,
-            /* Software */ nullptr,
-            /* Flags */ D3D11_CREATE_DEVICE_SINGLETHREADED | D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-            /* pFeatureLevels */ &featureLevel,
-            /* FeatureLevels */ 1,
-            /* SDKVersion */ D3D11_SDK_VERSION,
-            /* ppDevice */ device.put(),
-            /* pFeatureLevel */ nullptr,
+            /* pAdapter           */ nullptr,
+            /* DriverType         */ D3D_DRIVER_TYPE_HARDWARE,
+            /* Software           */ nullptr,
+            /* Flags              */ D3D11_CREATE_DEVICE_SINGLETHREADED | D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            /* pFeatureLevels     */ &featureLevel,
+            /* FeatureLevels      */ 1,
+            /* SDKVersion         */ D3D11_SDK_VERSION,
+            /* ppDevice           */ device.put(),
+            /* pFeatureLevel      */ nullptr,
             /* ppImmediateContext */ deviceContext.put()));
 
-        DXGI_SWAP_CHAIN_DESC1 desc{};
-        desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-        desc.SampleDesc.Count = 1;
-        desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        desc.BufferCount = 2;
-        desc.Scaling = DXGI_SCALING_NONE;
-        desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-        desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
-        desc.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+        static constexpr DXGI_SWAP_CHAIN_DESC1 desc{
+            .Format = DXGI_FORMAT_B8G8R8A8_UNORM,
+            .SampleDesc = { .Count = 1 },
+            .BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
+            .BufferCount = 2,
+            .Scaling = DXGI_SCALING_NONE,
+            .SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD,
+            .AlphaMode = DXGI_ALPHA_MODE_IGNORE,
+            .Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT,
+        };
 
         wil::com_ptr<IDXGIFactory2> dxgiFactory;
         THROW_IF_FAILED(CreateDXGIFactory1(IID_PPV_ARGS(dxgiFactory.addressof())));
@@ -341,10 +344,11 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
         frameLatencyWaitableObject.reset(swapChain.query<IDXGISwapChain2>()->GetFrameLatencyWaitableObject());
     }
     {
-        D3D11_BUFFER_DESC desc{};
-        desc.ByteWidth = sizeof(ConstantBuffer);
-        desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        static constexpr D3D11_BUFFER_DESC desc{
+            .ByteWidth = sizeof(ConstantBuffer),
+            .Usage = D3D11_USAGE_DEFAULT,
+            .BindFlags = D3D11_BIND_CONSTANT_BUFFER,
+        };
         THROW_IF_FAILED(device->CreateBuffer(&desc, nullptr, constantBuffer.put()));
     }
     {
@@ -384,21 +388,6 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
     u32x2 tileSize;
     bool constantBufferInvalidated = true;
 
-    // shader hot reload in debug builds
-#ifndef NDEBUG
-    // If you run the project inside Visual Studio it'll have a working directory of $(SolutionDir)\src.
-    std::atomic sourceCodeInvalidationTime{ INT64_MAX };
-    const auto sourceCodeWatcher = wil::make_folder_change_reader_nothrow(L".", false, wil::FolderChangeEvents::FileName | wil::FolderChangeEvents::LastWriteTime, [&](wil::FolderChangeEvent, PCWSTR path) {
-        const auto pathLen = wcslen(path);
-        if (pathLen > 5 && memcmp(path + pathLen - 5, L".hlsl", 10) == 0)
-        {
-            auto expected = INT64_MAX;
-            const auto invalidationTime = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
-            sourceCodeInvalidationTime.compare_exchange_strong(expected, invalidationTime.time_since_epoch().count(), std::memory_order_relaxed);
-        }
-    });
-#endif
-
     for (;;)
     {
         WaitForSingleObjectEx(frameLatencyWaitableObject.get(), 10000, true);
@@ -436,7 +425,7 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
             {
                 // At fractional, higher display scales (like 150%, 250%),
                 // fonts like Consolas look a lot better than ProggyClean.
-                ImFontConfig config{};
+                ImFontConfig config;
                 config.SizePixels = std::floor(scale * 13.0f);
                 config.GlyphOffset.y = 1.0f;
                 config.OversampleH = 1;
@@ -561,14 +550,11 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
             d3dTextureRenderTarget->SetTextRenderingParams(linearParams.get());
 
             {
-                D2D1_COLOR_F backgroundColor{ background.r, background.g, background.b, background.a };
-                D2D1_COLOR_F foregroundColor{ foreground.r, foreground.g, foreground.b, foreground.a };
-
                 wil::com_ptr<ID2D1SolidColorBrush> foregroundBrush;
-                THROW_IF_FAILED(d2dTextureRenderTarget->CreateSolidColorBrush(&foregroundColor, nullptr, foregroundBrush.addressof()));
+                THROW_IF_FAILED(d2dTextureRenderTarget->CreateSolidColorBrush(&asD2DColor(foreground), nullptr, foregroundBrush.addressof()));
 
                 d2dTextureRenderTarget->BeginDraw();
-                d2dTextureRenderTarget->Clear(&backgroundColor);
+                d2dTextureRenderTarget->Clear(&asD2DColor(background));
                 d2dTextureRenderTarget->DrawTextLayout({}, textLayout.get(), foregroundBrush.get(), D2D1_DRAW_TEXT_OPTIONS_NONE);
                 THROW_IF_FAILED(d2dTextureRenderTarget->EndDraw());
             }
@@ -600,7 +586,12 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
 
             wil::com_ptr<ID3D11Texture2D> buffer;
             THROW_IF_FAILED(swapChain->GetBuffer(0, __uuidof(buffer), buffer.put_void()));
-            THROW_IF_FAILED(device->CreateRenderTargetView(buffer.get(), nullptr, renderTargetView.put()));
+
+            const D3D11_RENDER_TARGET_VIEW_DESC desc{
+                .Format = DXGI_FORMAT_B8G8R8A8_UNORM,
+                .ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D,
+            };
+            THROW_IF_FAILED(device->CreateRenderTargetView(buffer.get(), &desc, renderTargetView.put()));
             deviceContext->OMSetRenderTargets(1, renderTargetView.addressof(), nullptr);
 
             D3D11_VIEWPORT viewport{};
@@ -628,62 +619,6 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
 
             constantBufferInvalidated = true;
         }
-
-        // shader hot reload in debug builds
-#ifndef NDEBUG
-        if (const auto invalidationTime = sourceCodeInvalidationTime.load(std::memory_order_relaxed); invalidationTime != INT64_MAX && invalidationTime <= std::chrono::steady_clock::now().time_since_epoch().count())
-        {
-            sourceCodeInvalidationTime.store(INT64_MAX, std::memory_order_relaxed);
-
-            try
-            {
-                static constexpr auto compile = [](const wchar_t* path, const char* target) {
-                    const wil::unique_hfile fileHandle{ CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr) };
-                    THROW_LAST_ERROR_IF(!fileHandle);
-
-                    const auto fileSize = GetFileSize(fileHandle.get(), nullptr);
-                    const wil::unique_handle mappingHandle{ CreateFileMappingW(fileHandle.get(), nullptr, PAGE_READONLY, 0, fileSize, nullptr) };
-                    THROW_LAST_ERROR_IF(!mappingHandle);
-
-                    const wil::unique_mapview_ptr<void> dataBeg{ MapViewOfFile(mappingHandle.get(), FILE_MAP_READ, 0, 0, 0) };
-                    THROW_LAST_ERROR_IF(!dataBeg);
-
-                    wil::com_ptr<ID3DBlob> error;
-                    wil::com_ptr<ID3DBlob> blob;
-                    const auto hr = D3DCompile(
-                        /* pSrcData    */ dataBeg.get(),
-                        /* SrcDataSize */ fileSize,
-                        /* pFileName   */ nullptr,
-                        /* pDefines    */ nullptr,
-                        /* pInclude    */ D3D_COMPILE_STANDARD_FILE_INCLUDE,
-                        /* pEntrypoint */ "main",
-                        /* pTarget     */ target,
-                        /* Flags1      */ D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION | D3DCOMPILE_PACK_MATRIX_COLUMN_MAJOR | D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_WARNINGS_ARE_ERRORS,
-                        /* Flags2      */ 0,
-                        /* ppCode      */ blob.addressof(),
-                        /* ppErrorMsgs */ error.addressof());
-
-                    if (error)
-                    {
-                        std::thread t{ [error = std::move(error)]() noexcept {
-                            MessageBoxA(nullptr, static_cast<const char*>(error->GetBufferPointer()), "Compilation error", MB_SYSTEMMODAL | MB_ICONERROR | MB_OK);
-                        } };
-                        t.detach();
-                    }
-
-                    THROW_IF_FAILED(hr);
-                    return blob;
-                };
-
-                const auto vs = compile(L"main_vs.hlsl", "vs_4_1");
-                const auto ps = compile(L"main_ps.hlsl", "ps_4_1");
-
-                THROW_IF_FAILED(device->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, vertexShader.put()));
-                THROW_IF_FAILED(device->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, pixelShader.put()));
-            }
-            CATCH_LOG()
-        }
-#endif
 
         {
             // Our vertex shader uses a trick from Bill Bilodeau published in "Vertex Shader Tricks"

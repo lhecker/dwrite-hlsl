@@ -3,8 +3,6 @@
 
 #include "dwrite.h"
 
-#include <array>
-
 #include <wil/com.h>
 
 #pragma warning(disable : 26429) // Symbol '...' is never tested for nullness, it can be marked as not_null (f.23).
@@ -85,7 +83,7 @@ void DWrite_GetGammaRatios(float gamma, float (&out)[4]) noexcept
 // This belongs to isThinFontFamily().
 // Keep this in alphabetical order, or the loop will break.
 // Keep thinFontFamilyNamesMaxWithNull updated.
-static constexpr std::array thinFontFamilyNames{
+static constexpr const wchar_t* thinFontFamilyNames[]{
     L"Courier New",
     L"Fixed Miriam Transparent",
     L"Miriam Fixed",
