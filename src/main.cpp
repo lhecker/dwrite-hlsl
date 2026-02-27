@@ -652,7 +652,7 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
             }
 
             deviceContext->UpdateSubresource(constantBuffer.get(), 0, nullptr, &data, 0, 0);
-            constantBufferInvalidated = true;
+            constantBufferInvalidated = false;
         }
 
         {
