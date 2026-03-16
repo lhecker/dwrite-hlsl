@@ -12,7 +12,7 @@ cbuffer ConstBuffer : register(b0)
     float4 gammaRatios;
     float cleartypeEnhancedContrast;
     float grayscaleEnhancedContrast;
-    uint useClearType;
+    uint mode;
 };
 
 // d2dTexture stores text/glyphs as drawn by Direct2D natively.
@@ -40,7 +40,7 @@ float4 main(float4 pos: SV_Position): SV_Target
         upos.y -= splitPos.y;
     }
 
-    // We'll wrap d2d/d3dTexture coordinates until it it fills the the entire screen.
+    // We'll wrap d2d/d3dTexture coordinates until it fills the entire screen.
     // We add +1 because the right and lower border of each tile will get a grid-line.
     uint2 tilePos = upos % (tileSize + 1);
 
@@ -50,14 +50,23 @@ float4 main(float4 pos: SV_Position): SV_Target
 
     // This applies the internal DirectWrite alpha blending algorithm.
     float4 d3dColor;
-    if (useClearType)
+    switch (mode)
     {
-        d3dColor = DWrite_CleartypeBlend(gammaRatios, cleartypeEnhancedContrast, false, background, foreground, d3dTexture[tilePos]);
-    }
-    else
-    {
-        float4 c = DWrite_GrayscaleBlend(gammaRatios, grayscaleEnhancedContrast, false, foreground, d3dTexture[tilePos].a);
-        d3dColor = alphaBlendPremultiplied(background, c);
+        case 0:
+            // DWrite Grayscale AA
+            d3dColor = DWrite_GrayscaleBlend(gammaRatios, grayscaleEnhancedContrast, false, foreground, d3dTexture[tilePos].a);
+            d3dColor = alphaBlendPremultiplied(background, d3dColor);
+            break;
+        case 1:
+            // DWrite ClearType AA
+            d3dColor = DWrite_CleartypeBlend(gammaRatios, cleartypeEnhancedContrast, false, background, foreground, d3dTexture[tilePos]);
+            break;
+        case 2:
+        default:
+            // Primitive 1:1 copy (potentially with sRGB)
+            d3dColor = foreground * d3dTexture[tilePos];
+            d3dColor = alphaBlendPremultiplied(background, d3dColor);
+            break;
     }
 
     // It's technically not necessary to compute both d2dColor and d3dColor,

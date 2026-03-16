@@ -35,6 +35,13 @@ static bool g_viewportSizeChanged = true;
 static UINT g_dpi = USER_DEFAULT_SCREEN_DPI;
 static bool g_dpiChanged = true;
 
+enum class BlendMode : u32
+{
+    DWriteGrayscale,
+    DWriteClearType,
+    Primitive,
+};
+
 struct alignas(16) ConstantBuffer
 {
     alignas(sizeof(u32x2)) u32x2 splitPos;
@@ -45,7 +52,7 @@ struct alignas(16) ConstantBuffer
     alignas(sizeof(f32x4)) float gammaRatios[4];
     alignas(sizeof(f32)) f32 cleartypeEnhancedContrast = 0;
     alignas(sizeof(f32)) f32 grayscaleEnhancedContrast = 0;
-    alignas(sizeof(u32)) u32 useClearType = 0;
+    alignas(sizeof(u32)) BlendMode mode = BlendMode::DWriteGrayscale;
 };
 
 // Forward declare message handler from imgui_impl_win32.cpp
@@ -392,11 +399,11 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
     const auto fontNames = getSystemFontNames(fontCollection.get(), &localeName[0]);
     auto selectedFontName = getFontNameRefFromCollection(fontNames, "Consolas");
     int fontSize = 12;
-    f32x4 background{ 1.0f, 1.0f, 1.0f, 1.0f };
-    f32x4 foreground{ 0.0f, 0.0f, 0.0f, 1.0f };
+    f32x4 background{ 0.0f, 0.0f, 0.0f, 1.0f };
+    f32x4 foreground{ 1.0f, 1.0f, 1.0f, 1.0f };
     char textBuffer[1024]{};
     bool textChanged = true;
-    bool clearType = false;
+    BlendMode mode = BlendMode::DWriteGrayscale;
     bool srgb = false;
 
     // DirectWrite results
@@ -503,9 +510,23 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
             ImGui::Separator();
             ImGui::Spacing();
             {
-                textChanged |= ImGui::Checkbox("ClearType", &clearType);
-                if (ImGui::Checkbox("sRGB Render Target", &srgb))
+                static constexpr const char* modes[] = {
+                    "DWrite Grayscale",
+                    "DWrite Grayscale (sRGB)",
+                    "DWrite ClearType",
+                    "DWrite ClearType (sRGB)",
+                    "Primitive Copy",
+                    "Primitive Copy (sRGB)",
+                };
+
+                const auto count = IM_ARRAYSIZE(modes);
+                auto current = static_cast<int>(mode) * 2 + srgb;
+                current = std::min(current, count - 1);
+
+                if (ImGui::Combo("mode", &current, modes, count))
                 {
+                    mode = static_cast<BlendMode>(current / 2);
+                    srgb = (current % 2) != 0;
                     textChanged = true;
                     g_viewportSizeChanged = true; // force recreation of render targets
                 }
@@ -564,7 +585,7 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
             createD2DRenderTargetTexture(device.get(), d2dFactory.get(), srgb ? DXGI_FORMAT_B8G8R8A8_UNORM_SRGB : DXGI_FORMAT_B8G8R8A8_UNORM, tileSize.x, tileSize.y, g_dpi, d2dTextureRenderTarget.addressof(), d2dTextureView.put());
             createD2DRenderTargetTexture(device.get(), d2dFactory.get(), DXGI_FORMAT_B8G8R8A8_UNORM, tileSize.x, tileSize.y, g_dpi, d3dTextureRenderTarget.addressof(), d3dTextureView.put());
 
-            if (clearType)
+            if (mode == BlendMode::DWriteClearType)
             {
                 d2dTextureRenderTarget->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
                 d3dTextureRenderTarget->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
@@ -638,7 +659,7 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
             data.foreground = premultiplyColor(foreground);
             data.cleartypeEnhancedContrast = cleartypeEnhancedContrast;
             data.grayscaleEnhancedContrast = grayscaleEnhancedContrast;
-            data.useClearType = clearType;
+            data.mode = mode;
 
             if (srgb)
             {
