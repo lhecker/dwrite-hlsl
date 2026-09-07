@@ -41,6 +41,15 @@
     <ClInclude Include="src\dwrite.h">
       <Filter>src</Filter>
     </ClInclude>
+    <ClInclude Include="src\fts_fuzzy_match.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="src\imgui_combowithfilter.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="src\imgui_dwrite.h">
+      <Filter>src</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\main.cpp">
@@ -65,6 +74,12 @@
       <Filter>imgui</Filter>
     </ClCompile>
     <ClCompile Include="src\dwrite.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\imgui_combowithfilter.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\imgui_dwrite.cpp">
       <Filter>src</Filter>
     </ClCompile>
   </ItemGroup>
